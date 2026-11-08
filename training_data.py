@@ -1,21 +1,29 @@
 import random
 from lxml import etree
 import math
-from copy import deepcopy
+import ollama
 
-from torch._C._functionalization import values_ViewMeta
-from transformers.utils import logging
-from transformers import pipeline
-from transformers import AutoTokenizer
 
-tree = etree.parse("./samples/sample_2278278.xml")
-# tree = etree.parse("./samples/sample_1115373.xml")
+def is_valid_xml(xml):
+    try:
+        etree.fromstring(xml)
+        return True
+    except etree.XMLSyntaxError:
+        return False
+
+
+# color setup for print commands
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+RESET = "\033[0m"
+
+# tree = etree.parse("./samples/sample_2278278.xml")
+tree = etree.parse("./samples/sample_1115373.xml")
 root = tree.getroot()
 
-logging.set_verbosity_error()
-
-fill_mask = pipeline("fill-mask", model="bert-large-cased")
-tokenizer = AutoTokenizer.from_pretrained("bert-large-cased")
+print(f"Valid input XML: {is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True))}")
 
 # randomization represents the amount of modifications done to the xml indirectly
 # to handle all sizes of files, each modification step calcs a percentage using this score as a base
@@ -24,87 +32,160 @@ randomization = random.randint(1, 20)
 # removing elements
 
 elements = root.findall(".//*")
-print(f"subelements pre removal: {elements.__len__()}")
+removing_iterations = 0
 
-iterations = 0
-for i in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
     elements = root.findall(".//*")
-    element = random.choice(elements)
+    selected_element = random.choice(elements)
 
     # this tries to find a subelement of the already selected element. it tries this because this way the script favors
     # removing deeply nested elements. this is necessary since selecting a root-near element could cause a removal of a
     # huge chunk
-    subelements = element.findall(".//*")
+    subelements = selected_element.findall(".//*")
 
     if subelements:
-        element = random.choice(subelements)
+        selected_element = random.choice(subelements)
 
-    print(f"removing element {tree.getpath(element)}")
-    element.getparent().remove(element)
+    print(f"removing element {tree.getpath(selected_element)}")
+    selected_element.getparent().remove(selected_element)
 
-    iterations += 1
-
-print("removing iterations: ", iterations)
+    removing_iterations += 1
 
 # adding elements
 
 elements = root.findall(".//*")
-print(f"subelements pre addition: {elements.__len__()}")
+adding_failed_iterations = 0
+adding_iterations = 0
+adding_thinking_iterations = 0
 
-iterations = 0
-for i in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
     elements = root.findall(".//*")
-    element = random.choice(elements)
+    selected_element = random.choice(elements)
 
     # this favors selecting deeply nested elements again. the explanation for this behavior can be found in the removal section
-    subelements = element.findall(".//*")
+    subelements = selected_element.findall(".//*")
 
     if subelements:
-        element = random.choice(subelements)
+        selected_element = random.choice(subelements)
 
-    ########
-    print(f"adding element similar to {tree.getpath(element)}")
-    new_element = deepcopy(element)
+    print(f"adding element similar to {tree.getpath(selected_element)}")
 
-    print(f"el tag: {new_element.tag}")
-    print(f"attributes: {new_element.attrib}")
+    # this retrieves 5 elements on the same level as the selected element and converts them to one continues string
+    sibling_elements_as_string = ""
+    i = 0
+    for el in selected_element.getparent().findall("./*"):
+        if i == 5: break
+        sibling_elements_as_string += etree.tostring(el, encoding='unicode', pretty_print=True).strip() + "\n"
+        i += 1
 
-    for attribute in new_element.attrib:
-        attr_values_list = list()
+    response = ollama.chat(
+        model='gemma4:e2b',
+        messages=[
+            {
+                'role': 'system',
+                'content': """
+                You are a precise XML generator.
+                Analyze the provided sibling elements and output EXACTLY ONE single,
+                valid XML element that could sit alongside them.
+                Output raw XML only. No markdown, no multiple root elements!
+                """
+            },
+            {
+                'role': 'user',
+                'content': f"""
+                Here are some sibling elements for context:
+                {sibling_elements_as_string}
+                
+                Respond with ONE single new XML element of the exact same type/structure:
+                """
+            }
+        ],
+        options={'temperature': 0.1}
+    )
+    if "thinking" not in response["message"]:
+        print(f"{BLUE}Model did not think{RESET}")
+    else:
+        print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
+        adding_thinking_iterations += 1
+    print(f"Given elements: \n{sibling_elements_as_string}")
+    print(f"Newly generated element: \n{response["message"]["content"]}")
 
-        # this retrieves a list of all the values used in the same attribute in elements with the same tag
-        for el in element.getparent().findall(element.tag):
-            if attribute in el.attrib: attr_values_list.append(el.attrib[attribute])
-        print(f"attr list: {attr_values_list}")
-
-        # now 6 random values are picked from the list and used to predict a new one that fits the domain
-        prompt = list()
-        i = 0
-
-        while len(tokenizer.encode(", ".join(prompt))) < 300 and i < len(attr_values_list):
-            prompt.append(random.choice(attr_values_list))
-            i+=1
-
-        tmp=prompt[math.floor(len(prompt)/2)]
-        prompt[math.floor(len(prompt) / 2)]="[MASK]"
-        prompt.append(tmp)
-        prompt=", ".join(prompt)
-        prompt=f"The XML values are: {prompt}"
-        print(prompt)
-
-        results = fill_mask(
-            prompt,
-            top_k=1
-        )
-
-        for result in results:
-            print(f"############# predicted value: {result["token_str"]} for attribute {attribute}")
-
-    iterations += 1
-
-print("adding iterations: ", iterations)
+    if not is_valid_xml(response["message"]["content"]):
+        print(f"{RED}Failed generating a similar XML-Element!{RESET}")
+        adding_failed_iterations += 1
+    else:
+        print(f"{GREEN}Successfully generated a similar XML-Element!{RESET}")
+        new_element = etree.fromstring(response["message"]["content"])
+        selected_element.getparent().append(new_element)
+    adding_iterations += 1
 
 # renaming elements
+
+elements = root.findall(".//*")
+renaming_iterations = 0
+renaming_thinking_iterations = 0
+renaming_nr_of_modified_elements = 0
+
+for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+    elements = root.findall(".//*")
+    selected_element = random.choice(elements)
+
+    print(f"renaming element {tree.getpath(selected_element)}")
+
+    # this retrieves 5 elements on the same level as the selected element and converts them to one continues string
+    sibling_elements_as_string = ""
+    i = 0
+    for el in selected_element.getparent().findall("./*"):
+        if i == 5: break
+        sibling_elements_as_string += etree.tostring(el, encoding='unicode', pretty_print=True).strip() + "\n"
+        i += 1
+
+    response = ollama.chat(
+        model='gemma4:e2b',
+        messages=[
+            {
+                'role': 'system',
+                'content': 'You are a synonym generator. Take a look at the instruction and expression given and respond with an expression that fits the same domain!'
+            },
+            {
+                'role': 'user',
+                'content': f"""
+                Analyze the following XML-Element:
+                {etree.tostring(selected_element, encoding='unicode', pretty_print=True)}
+
+                This is the XML-Elements tag:
+                {selected_element.tag}
+                
+                Here are some sibling elements for context:
+                {sibling_elements_as_string}
+
+                Respond with a tag similar to this one. The XML-Element tag means the name of the XML-Element. Do NOT respond with the full XML-Element! If unclear read the following example:
+                XML-Element:
+                <user id=1>Franz Hinterbauer</user>
+                
+                XML-Element tag or name of XML-Element:
+                user
+                """
+            }
+        ],
+        options={'temperature': 0.1}
+    )
+    if "thinking" not in response["message"]:
+        print(f"{BLUE}Model did not think{RESET}")
+    else:
+        print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
+        renaming_thinking_iterations += 1
+
+    print(f"response: \n{response["message"]["content"]}")
+
+    for el in root.findall(f".//{selected_element.tag}"):
+        el.tag = response["message"]["content"]
+        renaming_nr_of_modified_elements += 1
+
+    new_element = etree.fromstring(etree.tostring(selected_element, encoding='unicode', pretty_print=True))
+    print(new_element)
+
+    renaming_iterations += 1
 
 # removing properties
 
@@ -118,8 +199,24 @@ print("adding iterations: ", iterations)
 
 # moving elements
 
+print(f"""{GREEN}
+Stats:
 
-# print(f"\n\n\n\n Modified XML: \n {etree.tostring(tree, pretty_print=True)}")
+removing_iterations {removing_iterations}
+
+adding_iterations {adding_iterations}
+adding_thinking_iterations {adding_thinking_iterations}
+adding_failed_iterations {adding_failed_iterations}
+
+renaming_iterations {renaming_iterations}
+renaming_thinking_iterations {renaming_thinking_iterations}
+renaming_nr_of_modified_elements {renaming_nr_of_modified_elements}
+{RESET}""")
+
+with open("./samples/modified.xml", "wb") as f:
+    tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
+    tree.write_c14n(f, with_comments=False, exclusive=False)
+    print(f"{GREEN}Successfully saved modified xml{RESET}")
 
 """
 when changing text the new text should make sense. thus smth similar to the original could be used or smth as unknown
