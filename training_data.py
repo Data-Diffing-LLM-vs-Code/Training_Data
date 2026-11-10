@@ -25,16 +25,15 @@ root = tree.getroot()
 
 print(f"Valid input XML: {is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True))}")
 
-# randomization represents the amount of modifications done to the xml indirectly
+# randomization represents the amount of modifications done to the XML indirectly
 # to handle all sizes of files, each modification step calcs a percentage using this score as a base
 randomization = random.randint(1, 20)
 
 # removing elements
+removing_element_iterations = 0
 
 elements = root.findall(".//*")
-removing_iterations = 0
-
-for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+for removing_element_iterations in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
     elements = root.findall(".//*")
     selected_element = random.choice(elements)
 
@@ -43,32 +42,33 @@ for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2
     # huge chunk
     subelements = selected_element.findall(".//*")
 
-    if subelements:
+    if len(subelements) > 0:
         selected_element = random.choice(subelements)
 
-    print(f"removing element {tree.getpath(selected_element)}")
+    print(
+        f"{YELLOW}#### removing element {tree.getpath(selected_element)} as iteration nr {removing_element_iterations} ####{RESET}")
     selected_element.getparent().remove(selected_element)
-
-    removing_iterations += 1
 
 # adding elements
 
 elements = root.findall(".//*")
-adding_failed_iterations = 0
-adding_iterations = 0
-adding_thinking_iterations = 0
+adding_elements_failed_iterations = 0
+adding_elements_thinking_iterations = 0
+adding_elements_iterations = 0
 
-for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+# 0,1 - 2 % of the elements
+for adding_elements_iterations in range(math.ceil(elements.__len__() * randomization / 1000)):
     elements = root.findall(".//*")
     selected_element = random.choice(elements)
 
     # this favors selecting deeply nested elements again. the explanation for this behavior can be found in the removal section
     subelements = selected_element.findall(".//*")
 
-    if subelements:
+    if len(subelements) > 0:
         selected_element = random.choice(subelements)
 
-    print(f"adding element similar to {tree.getpath(selected_element)}")
+    print(
+        f"{YELLOW}#### adding element similar to {tree.getpath(selected_element)} as iteration nr {adding_elements_iterations} ####{RESET}")
 
     # this retrieves 5 elements on the same level as the selected element and converts them to one continues string
     sibling_elements_as_string = ""
@@ -85,9 +85,9 @@ for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2
                 'role': 'system',
                 'content': """
                 You are a precise XML generator.
-                Analyze the provided sibling elements and output EXACTLY ONE single,
-                valid XML element that could sit alongside them.
-                Output raw XML only. No markdown, no multiple root elements!
+                Analyze the provided sibling elements and output EXACTLY ONE single, valid XML element that could 
+                sit alongside them. Output raw XML only. Ensure you close the XML-Element correctly. No markdown, 
+                no multiple root elements!
                 """
             },
             {
@@ -106,31 +106,33 @@ for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2
         print(f"{BLUE}Model did not think{RESET}")
     else:
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
-        adding_thinking_iterations += 1
+        adding_elements_thinking_iterations += 1
     print(f"Given elements: \n{sibling_elements_as_string}")
     print(f"Newly generated element: \n{response["message"]["content"]}")
 
     if not is_valid_xml(response["message"]["content"]):
         print(f"{RED}Failed generating a similar XML-Element!{RESET}")
-        adding_failed_iterations += 1
+        adding_elements_failed_iterations += 1
     else:
         print(f"{GREEN}Successfully generated a similar XML-Element!{RESET}")
         new_element = etree.fromstring(response["message"]["content"])
         selected_element.getparent().append(new_element)
-    adding_iterations += 1
 
 # renaming elements
 
 elements = root.findall(".//*")
-renaming_iterations = 0
-renaming_thinking_iterations = 0
-renaming_nr_of_modified_elements = 0
+renaming_elements_thinking_iterations = 0
+renaming_elements_nr_of_modified_elements = 0
+renaming_elements_failed_iterations = 0
+renaming_elements_iterations = 0
 
-for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
+for renaming_elements_iterations in range(
+        math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2 % of the elements
     elements = root.findall(".//*")
     selected_element = random.choice(elements)
 
-    print(f"renaming element {tree.getpath(selected_element)}")
+    print(
+        f"{YELLOW}#### renaming element {tree.getpath(selected_element)} as iteration nr {renaming_elements_iterations} ####{RESET}")
 
     # this retrieves 5 elements on the same level as the selected element and converts them to one continues string
     sibling_elements_as_string = ""
@@ -174,20 +176,48 @@ for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2
         print(f"{BLUE}Model did not think{RESET}")
     else:
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
-        renaming_thinking_iterations += 1
+        renaming_elements_thinking_iterations += 1
 
-    print(f"response: \n{response["message"]["content"]}")
+    if response["message"]["content"] is None:
+        print(f"{RESET}Failed renaming an element!{RESET}")
+        renaming_elements_failed_iterations += 1
+    else:
+        print(f"response: \n{response["message"]["content"]}")
 
-    for el in root.findall(f".//{selected_element.tag}"):
-        el.tag = response["message"]["content"]
-        renaming_nr_of_modified_elements += 1
+        for el in selected_element.getparent().findall(f".//{selected_element.tag}"):
+            el.tag = response["message"]["content"]
+            renaming_elements_nr_of_modified_elements += 1
 
-    new_element = etree.fromstring(etree.tostring(selected_element, encoding='unicode', pretty_print=True))
-    print(new_element)
-
-    renaming_iterations += 1
+        new_element = etree.fromstring(etree.tostring(selected_element, encoding='unicode', pretty_print=True))
+        print(new_element)
 
 # removing properties
+removing_attribute_iterations = 0
+removing_attributes_nr_of_modified_elements = 0
+
+elements = root.findall(".//*")
+
+# 0,1 - 2 % of the elements
+for removing_attribute_iterations in range(math.ceil(elements.__len__() * randomization / 1000)):
+    elements = root.findall(".//*")
+    selected_element = random.choice(elements)
+
+    # this favors selecting deeply nested elements again. the explanation for this behavior can be found in the removal section
+    subelements = selected_element.findall(".//*")
+
+    if len(subelements) > 0:
+        selected_element = random.choice(subelements)
+
+    attribute_pool = list(selected_element.attrib.keys())
+    print(f"attribute pool: {attribute_pool}")
+
+    if len(attribute_pool)>0:
+        selected_attribute = random.choice(attribute_pool)
+
+        print(
+            f"{YELLOW}#### removing attribute {selected_attribute} from element {tree.getpath(selected_element)} as iteration nr {removing_attribute_iterations} ####{RESET}")
+        selected_element.attrib.pop(selected_attribute)
+        removing_attributes_nr_of_modified_elements+=1
 
 # adding properties
 
@@ -202,18 +232,22 @@ for _ in range(math.ceil(elements.__len__() * randomization / 1000)):  # 0,1 - 2
 print(f"""{GREEN}
 Stats:
 
-removing_iterations {removing_iterations}
+removing_elements_iterations {removing_element_iterations}
 
-adding_iterations {adding_iterations}
-adding_thinking_iterations {adding_thinking_iterations}
-adding_failed_iterations {adding_failed_iterations}
+adding_elements_iterations {adding_elements_iterations}
+adding_elements_thinking_iterations {adding_elements_thinking_iterations}
+adding_elements_failed_iterations {adding_elements_failed_iterations}
 
-renaming_iterations {renaming_iterations}
-renaming_thinking_iterations {renaming_thinking_iterations}
-renaming_nr_of_modified_elements {renaming_nr_of_modified_elements}
+renaming_elements_iterations {renaming_elements_iterations}
+renaming_elements_thinking_iterations {renaming_elements_thinking_iterations}
+renaming_elements_nr_of_modified_elements {renaming_elements_nr_of_modified_elements}
+renaming_elements_failed_iterations {renaming_elements_failed_iterations}
+
+removing_attribute_iterations {removing_attribute_iterations}
+removing_attributes_nr_of_modified_elements {removing_attributes_nr_of_modified_elements}
 {RESET}""")
 
-with open("./samples/modified.xml", "wb") as f:
+with open("./samples/modified2.xml", "wb") as f:
     tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
     tree.write_c14n(f, with_comments=False, exclusive=False)
     print(f"{GREEN}Successfully saved modified xml{RESET}")
