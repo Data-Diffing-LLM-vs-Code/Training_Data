@@ -24,7 +24,7 @@ BLUE = "\033[34m"
 RESET = "\033[0m"
 
 # tree = etree.parse("./samples/sample_2278278.xml")
-tree = etree.parse("./samples/sample_1115373.xml")
+tree = etree.parse("./samples/sample_c.xml")
 root = tree.getroot()
 
 print(f"Valid input XML: {is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True))}")
@@ -35,7 +35,6 @@ print(f"Valid input XML: {is_valid_xml(etree.tostring(root, encoding='unicode', 
 # removing elements
 randomization = random.randint(1, 3)
 removing_elements_iterations = 0
-
 elements = root.findall(".//*")
 
 # 1 - 3 % of the elements
@@ -58,10 +57,10 @@ for removing_elements_iterations in range(math.ceil(elements.__len__() * randomi
 
 # adding elements
 randomization = random.randint(1, 5)
-elements = root.findall(".//*")
 adding_elements_failed_iterations = 0
 adding_elements_thinking_iterations = 0
 adding_elements_iterations = 0
+elements = root.findall(".//*")
 
 # 1 - 5 % of the elements
 for adding_elements_iterations in range(math.ceil(elements.__len__() * randomization / 100)):
@@ -107,7 +106,8 @@ for adding_elements_iterations in range(math.ceil(elements.__len__() * randomiza
                 """
             }
         ],
-        options={'temperature': 0.1}
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -129,7 +129,6 @@ for adding_elements_iterations in range(math.ceil(elements.__len__() * randomiza
 randomization = random.randint(1, 3)
 elements = root.findall(".//*")
 renaming_elements_thinking_iterations = 0
-renaming_elements_nr_of_modified_elements = 0
 renaming_elements_failed_iterations = 0
 renaming_elements_iterations = 0
 
@@ -178,7 +177,8 @@ for renaming_elements_iterations in range(math.ceil(elements.__len__() * randomi
                 """
             }
         ],
-        options={'temperature': 0.1}
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -192,14 +192,11 @@ for renaming_elements_iterations in range(math.ceil(elements.__len__() * randomi
     else:
         print(f"Model Response: {response["message"]["content"]}")
 
-        for el in selected_element.getparent().findall(f".//{selected_element.tag}"):
-            el.tag = response["message"]["content"]
-            renaming_elements_nr_of_modified_elements += 1
+        selected_element.tag = response["message"]["content"]
 
 # removing attributes
 randomization = random.randint(1, 3)
 removing_attributes_iterations = 0
-removing_attributes_nr_of_modified_elements = 0
 
 elements = root.findall(".//*")
 
@@ -231,21 +228,12 @@ for removing_attributes_iterations in range(math.ceil(elements.__len__() * rando
 
     selected_attribute = random.choice(attribute_pool)
 
-    print(
-        f"removing attribute {selected_attribute} from element {tree.getpath(selected_element)}")
-    affected_elements = selected_element.getparent().findall(f"./{selected_element.tag}")
-
-    print(f"affected els: {affected_elements}")
-
-    for el in affected_elements:
-        if selected_attribute in el.attrib:
-            el.attrib.pop(selected_attribute)
-            removing_attributes_nr_of_modified_elements += 1
+    print(f"removing attribute {selected_attribute} from element {tree.getpath(selected_element)}")
+    selected_element.attrib.pop(selected_attribute)
 
 # adding attribute
 randomization = random.randint(1, 5)
 adding_attributes_iterations = 0
-adding_attributes_nr_of_modified_elements = 0
 adding_attributes_thinking_iterations = 0
 adding_attributes_failed_iterations = 0
 
@@ -287,7 +275,8 @@ for adding_attributes_iterations in range(math.ceil(elements.__len__() * randomi
                     """
             }
         ],
-        options={'temperature': 0.1}
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -304,20 +293,12 @@ for adding_attributes_iterations in range(math.ceil(elements.__len__() * randomi
         adding_attributes_failed_iterations += 1
         continue
 
-    print(
-        f"adding attribute {new_attribute} to element {tree.getpath(selected_element)}")
-    affected_elements = selected_element.getparent().findall(f"./{selected_element.tag}")
-
-    print(f"affected els: {affected_elements}")
-
-    for el in affected_elements:
-        el.set(new_attribute.split("=")[0], new_attribute.split("=")[1].replace("\"", ""))
-        adding_attributes_nr_of_modified_elements += 1
+    print(f"adding attribute {new_attribute} to element {tree.getpath(selected_element)}")
+    selected_element.set(new_attribute.split("=")[0], new_attribute.split("=")[1].replace("\"", ""))
 
 # renaming attributes
 randomization = random.randint(1, 3)
 renaming_attributes_iterations = 0
-renaming_attributes_nr_of_modified_elements = 0
 renaming_attributes_thinking_iterations = 0
 
 elements = root.findall(".//*")
@@ -376,7 +357,8 @@ for renaming_attributes_iterations in range(math.ceil(elements.__len__() * rando
                     """
             }
         ],
-        options={'temperature': 0.1}
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -389,20 +371,182 @@ for renaming_attributes_iterations in range(math.ceil(elements.__len__() * rando
     print(f"Model Response: {new_attribute_identifier}")
 
     print(f"renaming attribute {selected_attribute} to {new_attribute_identifier}")
-    affected_elements = selected_element.getparent().findall(f"./{selected_element.tag}")
-
-    print(f"affected els: {affected_elements}")
-
-    for el in affected_elements:
-        if selected_attribute in el.attrib:
-            el.set(new_attribute_identifier, el.attrib.pop(selected_attribute))
-            renaming_attributes_nr_of_modified_elements += 1
+    selected_element.set(new_attribute_identifier, selected_element.attrib.pop(selected_attribute))
 
 # changing element text
+randomization = random.randint(1, 5)
+changing_text_iterations = 0
+changing_text_thinking_iterations = 0
+changing_text_failed_iterations = 0
 
-# changing property values
+elements = root.findall(".//*")
+
+for changing_text_iterations in range(math.ceil(len(elements) * randomization / 100)):
+    print(f"{YELLOW}### changing element text iteration nr {changing_text_iterations} ###{RESET}")
+    elements = root.findall(".//*")
+    selected_element = random.choice(elements)
+
+    i = 0
+    while (len(selected_element) > 0 or selected_element.text is None or not selected_element.text.strip()) and i < 10:
+        selected_element = random.choice(elements)
+        i += 1
+
+    if not selected_element.text:
+        print("Didnt find an element with text inside. Skipping...")
+        continue
+
+    old_text = selected_element.text.strip()
+
+    print(f"changing text of {tree.getpath(selected_element)}")
+    print(old_text)
+
+    response = ollama.chat(
+        model="gemma4:e2b",
+        messages=[
+            {
+                "role": "system",
+                "content": """
+                    You generate replacement XML element text.
+                    Return only the replacement text, with no markup or explanation.
+                """
+            },
+            {
+                "role": "user",
+                "content": f"""
+                Element: 
+                {etree.tostring(selected_element, encoding='unicode', pretty_print=True).strip()}
+                
+                Current text:
+                {old_text.strip()}
+                
+                Provide a plausible replacement for the current text that fits the element's meaning and context.
+                """,
+            },
+        ],
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384},
+    )
+
+    if "thinking" not in response["message"]:
+        print(f"{BLUE}Model did not think{RESET}")
+    else:
+        print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
+        changing_text_thinking_iterations += 1
+
+    new_text = response["message"]["content"].strip()
+    if new_text is None or new_text == old_text:
+        print(f"{RED}Failed generating replacement text!{RESET}")
+        changing_text_failed_iterations += 1
+        continue
+
+    selected_element.text = new_text
+    print(f"Changed text from {old_text} to {new_text}")
+
+# changing attribute values
+randomization = random.randint(1, 5)
+changing_attribute_values_iterations = 0
+changing_attribute_values_thinking_iterations = 0
+changing_attribute_values_failed_iterations = 0
+
+elements = root.findall(".//*")
+
+for changing_attribute_values_iterations in range(math.ceil(len(elements) * randomization / 100)):
+    print(f"{YELLOW}### changing attribute value iteration nr {changing_attribute_values_iterations} ###{RESET}")
+    eligible_elements = list()
+
+    for el in root.findall(".//*"):
+        if len(list(el.attrib)) > 0:
+            eligible_elements.append(el)
+
+    if len(eligible_elements) == 0:
+        print("Didnt find an element with attributes. Skipping...")
+        break
+
+    selected_element = random.choice(eligible_elements)
+    selected_attribute = random.choice(list(selected_element.attrib))
+    old_value = selected_element.attrib[selected_attribute]
+
+    print(f"""changing attribute {selected_attribute} on {tree.getpath(selected_element)}""")
+
+    response = ollama.chat(
+        model="gemma4:e2b",
+        messages=[
+            {
+                "role": "system",
+                "content": """
+                    You generate replacement values for XML attributes.
+                    Return only the new value, with no attribute name, quotes, markup or explanation.
+                """,
+            },
+            {
+                "role": "user",
+                "content": f"""
+                Element: {etree.tostring(selected_element, encoding='unicode', pretty_print=True).strip()}
+                Attribute: {selected_attribute}
+                Current value: {old_value}
+
+                Provide a different plausible value that fits the attribute's meaning and context.
+                """,
+            },
+        ],
+        think=True,
+        options={"temperature": 0.1, "num_ctx": 16384},
+    )
+
+    if "thinking" not in response["message"]:
+        print(f"{BLUE}Model did not think{RESET}")
+    else:
+        print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
+        changing_attribute_values_thinking_iterations += 1
+
+    new_value = response["message"]["content"].strip()
+    if new_value is None or new_value == old_value:
+        print(f"{RED}Failed generating a replacement value!{RESET}")
+        changing_attribute_values_failed_iterations += 1
+        continue
+
+    selected_element.set(selected_attribute, new_value)
+    print(f"Changed {selected_attribute} from {old_value} to {new_value}")
 
 # moving elements
+
+randomization = random.randint(1, 3)
+moving_elements_iterations = 0
+
+elements = root.findall(".//*")
+
+for moving_elements_iterations in range(math.ceil(len(elements) * randomization / 100)):
+    print(f"{YELLOW}### moving element iteration nr {moving_elements_iterations} ###{RESET}")
+
+    eligible_elements = list()
+
+    for el in root.findall(".//*"):
+        if len(el.findall("./*")) > 1:
+            eligible_elements.append(el)
+
+    if len(eligible_elements) == 0:
+        print("Didnt find an element with attributes. Skipping...")
+        break
+
+    selected_element = random.choice(eligible_elements)
+    subelements = selected_element.findall("./*")
+
+    indices = list(range(len(subelements)))
+    source_index = random.choice(indices)
+    print(f"source index {source_index}")
+    source_element = subelements[source_index]
+    print(f"source element {etree.tostring(source_element, encoding='unicode').strip()}")
+    indices.remove(source_index)
+    print(indices)
+    target_index = random.choice(indices)
+    print(f"target index {target_index}")
+
+    selected_element.remove(source_element)
+    print(f"before insertion: {selected_element.findall("./*")}")
+    selected_element.insert(target_index, source_element)
+
+    print(selected_element.findall("./*"))
+    print(f"subelements: {subelements}")
 
 print(f"""{GREEN}
 Stats:
@@ -415,28 +559,30 @@ adding_elements_failed_iterations {adding_elements_failed_iterations}
 
 renaming_elements_iterations {renaming_elements_iterations}
 renaming_elements_thinking_iterations {renaming_elements_thinking_iterations}
-renaming_elements_nr_of_modified_elements {renaming_elements_nr_of_modified_elements}
 renaming_elements_failed_iterations {renaming_elements_failed_iterations}
 
 removing_attributes_iterations {removing_attributes_iterations}
-removing_attributes_nr_of_modified_elements {removing_attributes_nr_of_modified_elements}
 
 adding_attributes_iterations {adding_attributes_iterations}
-adding_attribute_nr_of_modified_elements {adding_attributes_nr_of_modified_elements}
 adding_attribute_thinking_iterations {adding_attributes_thinking_iterations}
 adding_attributes_failed_iterations {adding_attributes_failed_iterations}
 
 renaming_attributes_iterations {renaming_attributes_iterations}
-renaming_attributes_nr_of_modified_elements {renaming_attributes_nr_of_modified_elements}
 renaming_attributes_thinking_iterations {renaming_attributes_thinking_iterations}
+
+changing_text_iterations {changing_text_iterations}
+changing_text_thinking_iterations {changing_text_thinking_iterations}
+changing_text_failed_iterations {changing_text_failed_iterations}
+
+changing_attribute_values_iterations {changing_attribute_values_iterations}
+changing_attribute_values_thinking_iterations {changing_attribute_values_thinking_iterations}
+changing_attribute_values_failed_iterations {changing_attribute_values_failed_iterations}
 
 {RESET}""")
 
 with open("./samples/modified.xml", "wb") as f:
     tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
+    root = tree.getroot()
+    etree.indent(root, space="  ")
     tree.write_c14n(f, with_comments=False, exclusive=False)
     print(f"{GREEN}Successfully saved modified xml{RESET}")
-
-"""
-when changing text the new text should make sense. thus smth similar to the original could be used or smth as unknown
-"""
