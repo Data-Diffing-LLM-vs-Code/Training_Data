@@ -1,12 +1,13 @@
 import random
+from importlib.metadata import entry_points
+
 from lxml import etree
 import math
 import ollama
+import json
 
 # todo check if the valid xml check also falsly claims that elements that use a namespace are invalid since they arent declared beforehand
-# todo make sure to add elements after the selected element not at the end of the parent element
 # todo test if continuing the same chat with the model might increase the quality of the generated elements
-
 
 # color setup for print commands
 RED = "\033[31m"
@@ -15,6 +16,7 @@ YELLOW = "\033[33m"
 BLUE = "\033[34m"
 RESET = "\033[0m"
 
+changes = []
 
 def is_valid_xml(xml):
     try:
@@ -26,6 +28,12 @@ def is_valid_xml(xml):
 
 def remove_element(element):
     element.getparent().remove(element)
+    changes.append({
+        "line": element.sourceline,
+        "type": "removed",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0],
+        "newValue": ""
+    })
 
 
 def add_similar_element(element):
@@ -67,13 +75,26 @@ def add_similar_element(element):
     else:
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
 
-    if not is_valid_xml(response["message"]["content"]):
+    new_element = response["message"]["content"].strip()
+
+    if not is_valid_xml(new_element):
         print(f"{RED}Failed generating a similar XML-Element!{RESET}")
+        return False
     else:
         print(f"{GREEN}Successfully generated a similar XML-Element!{RESET}")
-        new_element = etree.fromstring(response["message"]["content"])
         parent = element.getparent()
-        parent.insert(parent.index(element) + 1, new_element)
+        parent.insert(parent.index(element) + 1, etree.fromstring(new_element))
+
+        changes.append({
+            "line": element.sourceline+1,
+            "type": "added",
+            "oldValue": "",
+            "newValue": new_element.split("\n")[0]
+        })
+
+        return True
+
+
 
 def rename_element(element):
     sibling_elements_as_string = ""
@@ -120,11 +141,38 @@ def rename_element(element):
     else:
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
 
-    if len(response["message"]["content"].strip()) == 0:
+    new_tag = response["message"]["content"].strip()
+
+    if len(new_tag) == 0 or element.tag.strip() == new_tag:
         print(f"{RESET}Failed renaming an element!{RESET}")
         return False
 
+    print(f"Renamed element {element.tag} to {new_tag}")
+
+    entry_opening_tag={
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
+    # if elements feature at least one child element, the opening and closing tag are on different lines.
+    # Since renaming the opening tag causes the closing tag to also be renamed, both of these lines need to be mentioned in the changes report.
+    # This if checks if a second entry in the changes report is need and if so, adds one
+    if element.find(".//*") is not None:
+        entry_closing_tag = {
+            "line": element.sourceline+etree.tostring(element, encoding="unicode").count("\n")-1,
+            "type": "modified",
+            "oldValue": f"</{element.tag}>"
+        }
+
     element.tag = response["message"]["content"]
+    entry_opening_tag["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    changes.append(entry_opening_tag)
+
+    if element.find(".//*") is not None:
+        entry_closing_tag["newValue"] = f"</{element.tag}"
+        changes.append(entry_closing_tag)
+
     return True
 
 
@@ -132,7 +180,17 @@ def remove_attribute(element):
     attribute_pool = list(element.attrib.keys())
     selected_attribute = random.choice(attribute_pool)
 
+    entry = {
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
     element.attrib.pop(selected_attribute)
+
+    entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+
+    changes.append(entry)
 
 
 def add_attribute(element):
@@ -174,7 +232,16 @@ def add_attribute(element):
         print(f"{RED}Failed generating a new attribute!{RESET}")
         return False
 
+    entry={
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
     element.set(new_attribute.split("=")[0], new_attribute.split("=")[1].replace("\"", ""))
+    entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    changes.append(entry)
+
     return True
 
 
@@ -220,8 +287,17 @@ def rename_attribute(element):
         print(f"{RED}Failed generating a new attribute identifier!{RESET}")
         return False
 
-    new_attribute_identifier = response["message"]["content"]
-    element.set(new_attribute_identifier, element.attrib.pop(selected_attribute))
+    entry={
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
+    element.set(response["message"]["content"], element.attrib.pop(selected_attribute))
+
+    entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    changes.append(entry)
+
     return True
 
 
@@ -265,7 +341,16 @@ def change_element_text(element):
         print(f"{RED}Failed generating replacement text!{RESET}")
         return False
 
+    entry={
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
     element.text = new_text
+    entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    changes.append(entry)
+
     print(f"Changed text from {old_text} to {new_text}")
     return True
 
@@ -309,47 +394,22 @@ def change_attribute_value(element):
         print(f"{RED}Failed generating a replacement value!{RESET}")
         return False
 
+    entry={
+        "line": element.sourceline,
+        "type": "modified",
+        "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    }
+
     element.set(selected_attribute, new_value)
-    print(f"Changed {selected_attribute} from {old_value} to {new_value}")
+    entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
+    changes.append(entry)
+
+    print(f"Changed attribute {selected_attribute} from {old_value} to {new_value}")
     return True
 
 
-"""
-randomization = random.randint(1, 3)
-moving_elements_iterations = 0
-
-elements = root.findall(".//*")
-
-for moving_elements_iterations in range(math.ceil(len(elements) * randomization / 100)):
-    print(f"{YELLOW}### moving element iteration nr {moving_elements_iterations} ###{RESET}")
-
-    eligible_elements = list()
-
-    for el in root.findall(".//*"):
-        if len(el.findall("./*")) > 1:
-            eligible_elements.append(el)
-
-    if len(eligible_elements) == 0:
-        print("Didnt find an element with attributes. Skipping...")
-        break
-
-    selected_element = random.choice(eligible_elements)
-    subelements = selected_element.findall("./*")
-
-    indices = list(range(len(subelements)))
-    source_index = random.choice(indices)
-    source_element = subelements[source_index]
-    indices.remove(source_index)
-    print(indices)
-    target_index = random.choice(indices)
-
-    selected_element.remove(source_element)
-    selected_element.insert(target_index, source_element)
-"""
-
-
 def main():
-    tree = etree.parse("./samples/sample_c.xml")
+    tree = etree.parse("./samples/sample_1115373_c.xml")
     root = tree.getroot()
 
     if not is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True)):
@@ -359,17 +419,9 @@ def main():
     elements = root.findall(".//*")
     i = 0
 
-    while i+10 < len(elements):
-        eligible_elements_for_removal = list()
-        eligible_elements_for_adding = list()
-        eligible_elements_for_renaming = list()
-        eligible_elements_for_attribute_removal = list()
-        eligible_elements_for_attribute_adding = list()
-        eligible_elements_for_attribute_renaming = list()
-        eligible_elements_for_attribute_value_changing = list()
-        eligible_elements_for_text_changing = list()
+    while i + 20 < len(elements):
 
-        i = i + random.randint(5, 10)
+        i = i + random.randint(15, 20)
         selected_element = elements[i]
         eligible_operations = list()
 
@@ -379,7 +431,7 @@ def main():
 
         # this tries to avoid removing elements with too many child elements, which could lead to drastic changes in the structure
         # this also ensure that no element with too many child elements is copied to also not drastically change the structure
-        if len(selected_element.findall(".//*"))==0:
+        if len(selected_element.findall(".//*")) == 0:
             eligible_operations.append("element_removal")
             eligible_operations.append("element_adding")
 
@@ -390,7 +442,8 @@ def main():
             eligible_operations.append("attribute_value_changing")
 
         # any element with no child element and some text can have its text changed
-        if len(selected_element.findall(".//*")) == 0 and selected_element.text is not None and len(selected_element.text.strip()) > 0:
+        if len(selected_element.findall(".//*")) == 0 and selected_element.text is not None and len(
+                selected_element.text.strip()) > 0:
             eligible_operations.append("text_changing")
 
         if len(eligible_operations) == 0:
@@ -416,12 +469,15 @@ def main():
         elif selected_operation == "text_changing":
             change_element_text(selected_element)
 
-    with open("./samples/modified.xml", "wb") as f:
+    with open("./samples/sample_1115373_c_m.xml", "wb") as f:
         tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
         root = tree.getroot()
         etree.indent(root, space="  ")
         tree.write_c14n(f, with_comments=False, exclusive=False)
         print(f"{GREEN}Successfully saved modified xml{RESET}")
+
+    with open("./samples/changes2.json", "w", encoding="utf-8") as f:
+        json.dump(changes, f, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
