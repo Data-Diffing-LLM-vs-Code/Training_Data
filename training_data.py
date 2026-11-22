@@ -1,10 +1,9 @@
 import random
+from pathlib import Path
+
 from lxml import etree
 import ollama
 import json
-
-# todo check if the valid xml check also falsely claims that elements that use a namespace are invalid since they aren't declared beforehand
-# todo test if continuing the same chat with the model might increase the quality of the generated elements
 
 # color setup for print commands
 RED = "\033[31m"
@@ -78,24 +77,26 @@ def add_similar_element(element):
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
 
     new_element = response["message"]["content"].strip()
+    print(f"Model Response: {new_element}")
 
-    if not is_valid_xml(new_element):
-        print(f"{RED}Failed generating a similar XML-Element!{RESET}")
-        return False
-    else:
-        print(f"{GREEN}Successfully generated a similar XML-Element!{RESET}")
+    try:
         parent = element.getparent()
         parent.insert(parent.index(element) + 1, etree.fromstring(new_element))
 
         changes.append({
-            "line": element.sourceline+1,
+            "line": element.sourceline + 1,
             "type": "added",
             "oldValue": "",
             "newValue": new_element.split("\n")[0]
         })
 
+        print(f"{GREEN}Successfully generated a similar XML-Element!{RESET}")
         print(f"Added the following element: {element.getroottree().getpath(element)}")
         return True
+    except Exception as e:
+        print(f"{RED}Failed generating a similar XML-Element!{RESET}")
+        print(f"{RED}Error: {e}{RESET}")
+        return False
 
 
 def rename_element(element):
@@ -424,100 +425,110 @@ def change_attribute_value(element):
 
 
 def main():
-    tree = etree.parse("./samples/sample_1115373_c.xml")
-    root = tree.getroot()
+    folder = Path("samples/training_data/source")
+    files = list(folder.iterdir())
+    files.sort()
 
-    if not is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True)):
-        print(f"{RED}The input XML is not valid!{RESET}")
-        return
+    for file in files:
+        print(f"{RED}Current File: {file}{RESET}")
 
-    elements = root.findall(".//*")
-    statistics = {
-        "element_removal_successful": 0,
-        "element_removal_failed": 0,
-        "element_adding_successful": 0,
-        "element_adding_failed": 0,
-        "element_renaming_successful": 0,
-        "element_renaming_failed": 0,
-        "attribute_removal_successful": 0,
-        "attribute_removal_failed": 0,
-        "attribute_adding_successful": 0,
-        "attribute_adding_failed": 0,
-        "attribute_renaming_successful": 0,
-        "attribute_renaming_failed": 0,
-        "attribute_value_changing_successful": 0,
-        "attribute_value_changing_failed": 0,
-        "text_changing_successful": 0,
-        "text_changing_failed": 0,
-    }
-    i = 0
+        tree = etree.parse(file)
+        root = tree.getroot()
 
-    while i + 20 < len(elements):
-
-        i = i + random.randint(5, 20)
-        selected_element = elements[i]
-        eligible_operations = list()
-
-        # it is assumed that any element can be renamed or feature an extra attribute
-        eligible_operations.append("element_renaming")
-        eligible_operations.append("attribute_adding")
-
-        # this tries to avoid removing elements with too many child elements, which could lead to drastic changes in the structure
-        # this also ensure that no element with too many child elements is copied to also not drastically change the structure
-        if len(selected_element.findall(".//*")) == 0:
-            eligible_operations.append("element_removal")
-            eligible_operations.append("element_adding")
-
-        # any element with attributes can have its attributes removed, renamed, or have their values changed
-        if len(selected_element.attrib) > 0:
-            eligible_operations.append("attribute_removal")
-            eligible_operations.append("attribute_renaming")
-            eligible_operations.append("attribute_value_changing")
-
-        # any element with no child element and some text can have its text changed
-        if len(selected_element.findall(".//*")) == 0 and selected_element.text is not None and len(
-                selected_element.text.strip()) > 0:
-            eligible_operations.append("text_changing")
-
-        if len(eligible_operations) == 0:
-            print(f"{YELLOW}No eligible operations for element found{RESET}")
+        if not is_valid_xml(etree.tostring(root, encoding='unicode', pretty_print=True)):
+            print(f"{RED}The input XML is not valid!{RESET}")
             continue
 
-        selected_operation = random.choice(eligible_operations)
+        elements = root.findall(".//*")
+        statistics = {
+            "element_removal_successful": 0,
+            "element_removal_failed": 0,
+            "element_adding_successful": 0,
+            "element_adding_failed": 0,
+            "element_renaming_successful": 0,
+            "element_renaming_failed": 0,
+            "attribute_removal_successful": 0,
+            "attribute_removal_failed": 0,
+            "attribute_adding_successful": 0,
+            "attribute_adding_failed": 0,
+            "attribute_renaming_successful": 0,
+            "attribute_renaming_failed": 0,
+            "attribute_value_changing_successful": 0,
+            "attribute_value_changing_failed": 0,
+            "text_changing_successful": 0,
+            "text_changing_failed": 0,
+        }
+        i = 0
 
-        if selected_operation == "element_removal":
-            is_successful = remove_element(selected_element)
-        elif selected_operation == "element_adding":
-            is_successful = add_similar_element(selected_element)
-        elif selected_operation == "element_renaming":
-            is_successful = rename_element(selected_element)
-        elif selected_operation == "attribute_removal":
-            is_successful = remove_attribute(selected_element)
-        elif selected_operation == "attribute_adding":
-            is_successful = add_attribute(selected_element)
-        elif selected_operation == "attribute_renaming":
-            is_successful = rename_attribute(selected_element)
-        elif selected_operation == "attribute_value_changing":
-            is_successful = change_attribute_value(selected_element)
-        elif selected_operation == "text_changing":
-            is_successful = change_element_text(selected_element)
+        while i + 20 < len(elements):
 
-        result = "successful" if is_successful else "failed"
-        statistics[f"{selected_operation}_{result}"] += 1
+            i = i + random.randint(5, 20)
+            selected_element = elements[i]
+            eligible_operations = list()
 
-    with open("./samples/sample_1115373_c_m.xml", "wb") as f:
-        tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
-        root = tree.getroot()
-        etree.indent(root, space="  ")
-        tree.write_c14n(f, with_comments=False, exclusive=False)
-        print(f"{GREEN}Successfully saved modified xml{RESET}")
+            # it is assumed that any element can be renamed or feature an extra attribute
+            eligible_operations.append("element_renaming")
+            eligible_operations.append("attribute_adding")
 
-    with open("./samples/statistics.json", "w", encoding="utf-8") as f:
-        json.dump(statistics, f, indent=2)
+            # this tries to avoid removing elements with too many child elements, which could lead to drastic changes in the structure
+            # this also ensure that no element with too many child elements is copied to also not drastically change the structure
+            if len(selected_element.findall(".//*")) == 0:
+                eligible_operations.append("element_removal")
+                eligible_operations.append("element_adding")
 
-    with open("./samples/changes.json", "w", encoding="utf-8") as f:
-        json.dump(changes, f, indent=2, ensure_ascii=False)
+            # any element with attributes can have its attributes removed, renamed, or have their values changed
+            if len(selected_element.attrib) > 0:
+                eligible_operations.append("attribute_removal")
+                eligible_operations.append("attribute_renaming")
+                eligible_operations.append("attribute_value_changing")
 
+            # any element with no child element and some text can have its text changed
+            if len(selected_element.findall(".//*")) == 0 and selected_element.text is not None and len(
+                    selected_element.text.strip()) > 0:
+                eligible_operations.append("text_changing")
+
+            if len(eligible_operations) == 0:
+                print(f"{YELLOW}No eligible operations for element found{RESET}")
+                continue
+
+            selected_operation = random.choice(eligible_operations)
+
+            if selected_operation == "element_removal":
+                is_successful = remove_element(selected_element)
+            elif selected_operation == "element_adding":
+                is_successful = add_similar_element(selected_element)
+            elif selected_operation == "element_renaming":
+                is_successful = rename_element(selected_element)
+            elif selected_operation == "attribute_removal":
+                is_successful = remove_attribute(selected_element)
+            elif selected_operation == "attribute_adding":
+                is_successful = add_attribute(selected_element)
+            elif selected_operation == "attribute_renaming":
+                is_successful = rename_attribute(selected_element)
+            elif selected_operation == "attribute_value_changing":
+                is_successful = change_attribute_value(selected_element)
+            elif selected_operation == "text_changing":
+                is_successful = change_element_text(selected_element)
+
+            result = "successful" if is_successful else "failed"
+            statistics[f"{selected_operation}_{result}"] += 1
+
+        file_b = Path(f"samples/training_data/completed_samples/{file.stem}_b.xml")
+        with open(file_b, "wb") as f:
+            tree = etree.fromstring(etree.tostring(tree), etree.XMLParser(remove_blank_text=True)).getroottree()
+            root = tree.getroot()
+            etree.indent(root, space="    ")
+            tree.write_c14n(f, with_comments=False, exclusive=False)
+            print(f"{GREEN}Successfully saved modified xml{RESET}")
+
+        with open(f"./samples/training_data/statistics/statistics_{file.stem}.json", "w", encoding="utf-8") as f:
+            json.dump(statistics, f, indent=2)
+
+        with open(f"./samples/training_data/completed_samples/changes_{file.stem}.json", "w", encoding="utf-8") as f:
+            json.dump(changes, f, indent=2, ensure_ascii=False)
+
+        file.replace(f"samples/training_data/completed_samples/{file.stem}_a.xml")
+        print(f"{GREEN}Successfully moved original file to completed_samples folder{RESET}")
 
 if __name__ == "__main__":
     main()
