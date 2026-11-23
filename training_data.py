@@ -170,7 +170,12 @@ def rename_element(element):
         }
 
     print(f"renamed element tag of {element.getroottree().getpath(element)} from {element.tag} to {new_tag}")
-    element.tag = new_tag
+    try:
+        element.tag = new_tag
+    except Exception as e:
+        print(f"{RED}Failed renaming an element!{RESET}")
+        print(f"{RED}Error: {e}{RESET}")
+        return False
     entry_opening_tag["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     changes.append(entry_opening_tag)
 
