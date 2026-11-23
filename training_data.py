@@ -436,6 +436,7 @@ def main():
 
     for file in files:
         print(f"{RED}Current File: {file}{RESET}")
+        changes.clear()
 
         tree = etree.parse(file)
         root = tree.getroot()
