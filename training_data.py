@@ -1,4 +1,5 @@
 import random
+from csv import excel_tab
 from pathlib import Path
 
 from lxml import etree
@@ -13,6 +14,7 @@ BLUE = "\033[34m"
 RESET = "\033[0m"
 
 changes = []
+
 
 def is_valid_xml(xml):
     try:
@@ -79,8 +81,8 @@ def add_similar_element(element):
     new_element = response["message"]["content"].strip()
     print(f"Model Response: {new_element}")
 
+    parent = element.getparent()
     try:
-        parent = element.getparent()
         parent.insert(parent.index(element) + 1, etree.fromstring(new_element))
 
         changes.append({
@@ -151,7 +153,7 @@ def rename_element(element):
         print(f"{RESET}Failed renaming an element!{RESET}")
         return False
 
-    entry_opening_tag={
+    entry_opening_tag = {
         "line": element.sourceline,
         "type": "modified",
         "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
@@ -160,11 +162,11 @@ def rename_element(element):
     # if elements feature at least one child element, the opening and closing tag are on different lines.
     # Since renaming the opening tag causes the closing tag to also be renamed, both of these lines need to be mentioned in the changes report.
     # This if checks if a second entry in the changes report is need and if so, adds one
-    element_has_children=False
+    element_has_children = False
     if element.find(".//*") is not None:
-        element_has_children=True
+        element_has_children = True
         entry_closing_tag = {
-            "line": element.sourceline+etree.tostring(element, encoding="unicode").count("\n")-1,
+            "line": element.sourceline + etree.tostring(element, encoding="unicode").count("\n") - 1,
             "type": "modified",
             "oldValue": f"</{element.tag}>"
         }
@@ -203,6 +205,7 @@ def remove_attribute(element):
     print(f"removed attribute {selected_attribute} from {element.getroottree().getpath(element)}")
     return True
 
+
 def add_attribute(element):
     print("adding an attribute")
     response = ollama.chat(
@@ -239,11 +242,12 @@ def add_attribute(element):
 
     print(f"Model Response: {new_attribute}")
 
-    if not "=" in new_attribute or len(new_attribute.split("=")) != 2 or "xmlns" in new_attribute or "{" in new_attribute:
+    if not "=" in new_attribute or len(
+            new_attribute.split("=")) != 2 or "xmlns" in new_attribute or "{" in new_attribute:
         print(f"{RED}Failed generating a new attribute!{RESET}")
         return False
 
-    entry={
+    entry = {
         "line": element.sourceline,
         "type": "modified",
         "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
@@ -256,9 +260,9 @@ def add_attribute(element):
         print(f"added attribute {new_attribute} to element {element.getroottree().getpath(element)}")
         return True
     except ValueError:
-        print(f"{RED}Failed applying the new attribute! Maybe a namespace was used since that isn't supported currently{RESET}")
+        print(
+            f"{RED}Failed applying the new attribute! Maybe a namespace was used since that isn't supported currently{RESET}")
         return False
-
 
 
 def rename_attribute(element):
@@ -300,21 +304,27 @@ def rename_attribute(element):
     else:
         print(f"{BLUE}Model thinking: {response["message"]["thinking"]}{RESET}")
 
-    new_attribute_identifier=response["message"]["content"].strip()
+    new_attribute_identifier = response["message"]["content"].strip()
 
     if len(new_attribute_identifier) == 0 or "xmlns" in new_attribute_identifier or "{" in new_attribute_identifier:
         print(f"{RED}Failed generating a new attribute identifier!{RESET}")
         return False
 
-    entry={
+    entry = {
         "line": element.sourceline,
         "type": "modified",
         "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     }
 
-    print(f"renamed attribute {selected_attribute} to {new_attribute_identifier} for element {element.getroottree().getpath(element)}")
-    element.set(new_attribute_identifier, element.attrib.pop(selected_attribute))
+    try:
+        element.set(new_attribute_identifier, element.attrib.pop(selected_attribute))
+    except Exception as e:
+        print(f"{RED}Failed applying the new attribute identifier!{RESET}")
+        print(f"{RED}Error: {e}{RESET}")
+        return False
 
+    print(
+        f"renamed attribute {selected_attribute} to {new_attribute_identifier} for element {element.getroottree().getpath(element)}")
     entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     changes.append(entry)
     return True
@@ -361,13 +371,19 @@ def change_element_text(element):
         print(f"{RED}Failed generating replacement text!{RESET}")
         return False
 
-    entry={
+    entry = {
         "line": element.sourceline,
         "type": "modified",
         "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     }
 
-    element.text = new_text
+    try:
+        element.text = new_text
+    except Exception as e:
+        print(f"{RED}Failed applying the new element text!{RESET}")
+        print(f"{RED}Error: {e}{RESET}")
+        return False
+
     entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     changes.append(entry)
 
@@ -415,17 +431,24 @@ def change_attribute_value(element):
         print(f"{RED}Failed generating a replacement value!{RESET}")
         return False
 
-    entry={
+    entry = {
         "line": element.sourceline,
         "type": "modified",
         "oldValue": etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     }
 
-    element.set(selected_attribute, new_value)
+    try:
+        element.set(selected_attribute, new_value)
+    except Exception as e:
+        print(f"{RED}Failed generating replacement value!{RESET}")
+        print(f"Error: {e}")
+        return False
+
     entry["newValue"] = etree.tostring(element, encoding='unicode').strip().split("\n")[0]
     changes.append(entry)
 
-    print(f"Changed attribute {selected_attribute} from {old_value} to {new_value} for element {element.getroottree().getpath(element)}")
+    print(
+        f"Changed attribute {selected_attribute} from {old_value} to {new_value} for element {element.getroottree().getpath(element)}")
     return True
 
 
@@ -535,6 +558,7 @@ def main():
 
         file.replace(f"samples/training_data/completed_samples/{file.stem}_a.xml")
         print(f"{GREEN}Successfully moved original file to completed_samples folder{RESET}")
+
 
 if __name__ == "__main__":
     main()
