@@ -1,7 +1,6 @@
 import random
-from csv import excel_tab
+from transformers import AutoTokenizer
 from pathlib import Path
-
 from lxml import etree
 import ollama
 import json
@@ -14,6 +13,8 @@ BLUE = "\033[34m"
 RESET = "\033[0m"
 
 changes = []
+
+tokenizer = AutoTokenizer.from_pretrained("google/gemma-4-E2B")
 
 
 def is_valid_xml(xml):
@@ -48,30 +49,39 @@ def add_similar_element(element):
         sibling_elements_as_string += etree.tostring(el, encoding='unicode', pretty_print=True).strip() + "\n"
         i += 1
 
+
+    system_message = """
+    You are a precise XML generator.
+    Analyze the provided sibling elements and output EXACTLY ONE single, valid XML element that could 
+    sit alongside them. Output raw XML only. Do NOT use namespaces in your new element! 
+    Ensure you close the XML-Element correctly. No markdown, no multiple root elements!
+    """
+
+    user_message = f"""
+    Here are some sibling elements for context:
+    {sibling_elements_as_string}
+                
+    Respond with ONE single new XML element of the exact same type/structure!
+    """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
     response = ollama.chat(
         model='gemma4:e2b',
         messages=[
             {
                 'role': 'system',
-                'content': """
-                You are a precise XML generator.
-                Analyze the provided sibling elements and output EXACTLY ONE single, valid XML element that could 
-                sit alongside them. Output raw XML only. Do NOT use namespaces in your new element! 
-                Ensure you close the XML-Element correctly. No markdown, no multiple root elements!
-                """
+                'content': system_message
             },
             {
                 'role': 'user',
-                'content': f"""
-                Here are some sibling elements for context:
-                {sibling_elements_as_string}
-                
-                Respond with ONE single new XML element of the exact same type/structure:
-                """
+                'content': user_message
             }
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384}
+        options={"temperature": 0.1, "num_ctx": 20480}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -111,36 +121,49 @@ def rename_element(element):
         sibling_elements_as_string += etree.tostring(el, encoding='unicode', pretty_print=True).strip() + "\n"
         i += 1
 
+    element_as_string = etree.tostring(element, encoding='unicode', pretty_print=True).strip()
+    
+    system_message = """
+        You are a synonym generator. Take a look at the instruction and expression given
+        and respond with an expression that fits the same domain!
+        """
+
+    user_message = f"""
+                    Analyze the following XML-Element:
+                    {element_as_string}
+
+                    This is the XML-Elements tag:
+                    {element.tag}
+
+                    Here are some sibling elements for context:
+                    {sibling_elements_as_string}
+
+                    Respond with a tag similar to this one. The XML-Element tag means the name of the XML-Element. Do NOT respond with the full XML-Element! If unclear read the following example:
+                    XML-Element:
+                    <user id=1>Franz Hinterbauer</user>
+
+                    XML-Element tag or name of XML-Element:
+                    user
+                    """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
     response = ollama.chat(
         model='gemma4:e2b',
         messages=[
             {
                 'role': 'system',
-                'content': 'You are a synonym generator. Take a look at the instruction and expression given and respond with an expression that fits the same domain!'
+                'content': system_message
             },
             {
                 'role': 'user',
-                'content': f"""
-                Analyze the following XML-Element:
-                {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
-
-                This is the XML-Elements tag:
-                {element.tag}
-                
-                Here are some sibling elements for context:
-                {sibling_elements_as_string}
-
-                Respond with a tag similar to this one. The XML-Element tag means the name of the XML-Element. Do NOT respond with the full XML-Element! If unclear read the following example:
-                XML-Element:
-                <user id=1>Franz Hinterbauer</user>
-                
-                XML-Element tag or name of XML-Element:
-                user
-                """
+                'content': user_message
             }
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384}
+        options={"temperature": 0.1, "num_ctx": 20480}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -182,7 +205,7 @@ def rename_element(element):
     changes.append(entry_opening_tag)
 
     if element_has_children:
-        entry_closing_tag["newValue"] = f"</{element.tag}"
+        entry_closing_tag["newValue"] = f"</{element.tag}>"
         changes.append(entry_closing_tag)
 
     return True
@@ -207,31 +230,41 @@ def remove_attribute(element):
 
 
 def add_attribute(element):
+    element_as_string = etree.tostring(element, encoding='unicode', pretty_print=True).strip()
+
+    system_message = """
+                    You are a precise XML generator.
+                    Analyze the provided XML-Element and output EXACTLY ONE single attribute that fits the provided domain. 
+                    Respond with ONE attribute in the form of attribute=value. Do NOT use namespaces! Do NOT Use double quotes 
+                    if you use a string as value. No markdown!
+                    """
+
+    user_message = f"""
+                        Analyze the following XML-Element:
+                        {element_as_string}
+
+                        Note the, if existing, attributes of the XML-Element and generate another one that fits the provided domain.
+                        """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
     print("adding an attribute")
     response = ollama.chat(
         model='gemma4:e2b',
         messages=[
             {
                 'role': 'system',
-                'content': """
-                You are a precise XML generator.
-                Analyze the provided XML-Element and output EXACTLY ONE single attribute that fits the provided domain. 
-                Respond with ONE attribute in the form of attribute=value. Do NOT use namespaces! Do NOT Use double quotes 
-                if you use a string as value. No markdown!
-                """
+                'content': system_message
             },
             {
                 'role': 'user',
-                'content': f"""
-                    Analyze the following XML-Element:
-                    {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
-
-                    Note the, if existing, attributes of the XML-Element and generate another one that fits the provided domain.
-                    """
+                'content': user_message
             }
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384}
+        options={"temperature": 0.1, "num_ctx": 20480}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -269,35 +302,45 @@ def rename_attribute(element):
     print("renaming an attribute")
     selected_attribute = random.choice(list(element.attrib.keys()))
 
+    element_as_string = etree.tostring(element, encoding='unicode', pretty_print=True).strip()
+
+    system_message = """
+                    You are a precise XML generator.
+                    Analyze the provided XML-Element and output EXACTLY ONE single attribute that fits the provided domain. 
+                    Respond with ONE attribute. No markdown!
+                    """
+
+    user_message = f"""
+                        Analyze the following XML-Element:
+                        {element_as_string}
+
+                        Note this attribute:
+                        {element.attrib[selected_attribute]}
+
+                        Generate a synonym for the identifier of the attribute. The identifier in this case is:
+                        {selected_attribute}
+
+                        ONLY generate a new identifier that fits the provided domain.
+                        """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
     response = ollama.chat(
         model='gemma4:e2b',
         messages=[
             {
                 'role': 'system',
-                'content': """
-                You are a precise XML generator.
-                Analyze the provided XML-Element and output EXACTLY ONE single attribute that fits the provided domain. 
-                Respond with ONE attribute. No markdown!
-                """
+                'content': system_message
             },
             {
                 'role': 'user',
-                'content': f"""
-                    Analyze the following XML-Element:
-                    {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
-
-                    Note this attribute:
-                    {element.attrib[selected_attribute]}
-                    
-                    Generate a synonym for the identifier of the attribute. The identifier in this case is:
-                    {selected_attribute}
-                    
-                    ONLY generate a new identifier that fits the provided domain.
-                    """
+                'content': user_message
             }
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384}
+        options={"temperature": 0.1, "num_ctx": 20480}
     )
     if "thinking" not in response["message"]:
         print(f"{BLUE}Model did not think{RESET}")
@@ -334,31 +377,38 @@ def change_element_text(element):
     print("changing an element text")
     old_text = element.text.strip()
 
+    system_message = """
+                        You generate replacement XML element text.
+                        Return only the replacement text, with no markup or explanation.
+                    """
+    user_message = f"""
+                    Element: 
+                    {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
+
+                    Current text:
+                    {old_text.strip()}
+
+                    Provide a plausible replacement for the current text that fits the element's meaning and context.
+                    """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
     response = ollama.chat(
         model="gemma4:e2b",
         messages=[
             {
                 "role": "system",
-                "content": """
-                    You generate replacement XML element text.
-                    Return only the replacement text, with no markup or explanation.
-                """
+                "content": system_message
             },
             {
                 "role": "user",
-                "content": f"""
-                Element: 
-                {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
-                
-                Current text:
-                {old_text.strip()}
-                
-                Provide a plausible replacement for the current text that fits the element's meaning and context.
-                """,
+                "content": user_message
             },
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384},
+        options={"temperature": 0.1, "num_ctx": 20480},
     )
 
     if "thinking" not in response["message"]:
@@ -396,29 +446,37 @@ def change_attribute_value(element):
     selected_attribute = random.choice(list(element.attrib))
     old_value = element.attrib[selected_attribute]
 
+    system_message = """
+                        You generate replacement values for XML attributes.
+                        Return only the new value, with no attribute name, quotes, markup or explanation.
+                    """
+    user_message = f"""
+                    Element: {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
+                    Attribute: {selected_attribute}
+                    Current value: {old_value}
+
+                    Provide a different plausible value that fits the attribute's meaning and context.
+                    """
+
+    if len(tokenizer.encode(system_message)) + len(tokenizer.encode(user_message)) > 10000:
+        print(f"{RED}The input exceed the maximum token limit. Skipping this element.{RESET}")
+        return False
+
+
     response = ollama.chat(
         model="gemma4:e2b",
         messages=[
             {
                 "role": "system",
-                "content": """
-                    You generate replacement values for XML attributes.
-                    Return only the new value, with no attribute name, quotes, markup or explanation.
-                """,
+                "content": system_message
             },
             {
                 "role": "user",
-                "content": f"""
-                Element: {etree.tostring(element, encoding='unicode', pretty_print=True).strip()}
-                Attribute: {selected_attribute}
-                Current value: {old_value}
-
-                Provide a different plausible value that fits the attribute's meaning and context.
-                """,
+                "content": user_message
             },
         ],
         think=True,
-        options={"temperature": 0.1, "num_ctx": 16384},
+        options={"temperature": 0.1, "num_ctx": 20480},
     )
 
     if "thinking" not in response["message"]:
